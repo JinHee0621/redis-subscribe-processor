@@ -122,14 +122,11 @@ public class MyProcessor extends AbstractProcessor {
             int redisPort = Integer.parseInt(context.getProperty(PORT).getValue());
             String channelNm = context.getProperty(CHANNEL).getValue();
 
-            int num1 = 5;
-            int num2 = 2;
-
             JedisPooled jedis = new JedisPooled(redisHost, redisPort);
             ExecutorService executor = Executors.newFixedThreadPool(1);
-            executor.execute(() -> jedis.subscribe(new MyRedis("onlyOne", session, REL_SUCCESS), channelNm));
 
-            // TODO implement
+            // Redis Session Run
+            executor.execute(() -> jedis.subscribe(new MyRedis("onlyOne", session, REL_SUCCESS), channelNm));
 
         } catch (Exception e) {
             return;
@@ -139,7 +136,6 @@ public class MyProcessor extends AbstractProcessor {
 }
 
 class MyRedis extends JedisPubSub {
-
     private String name;
     private ProcessSession session;
     private Relationship REL_SUCCESS;
