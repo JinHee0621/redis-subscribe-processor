@@ -36,7 +36,9 @@ import org.apache.nifi.processor.Relationship;
 import org.apache.nifi.processor.io.StreamCallback;
 import org.apache.nifi.processor.util.StandardValidators;
 
-import redis.clients.jedis.JedisPooled;
+import redis.clients.jedis.Jedis;
+import redis.clients.jedis.JedisPool;
+import redis.clients.jedis.JedisPoolConfig;
 import redis.clients.jedis.JedisPubSub;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -122,11 +124,12 @@ public class MyProcessor extends AbstractProcessor {
             int redisPort = Integer.parseInt(context.getProperty(PORT).getValue());
             String channelNm = context.getProperty(CHANNEL).getValue();
 
-            JedisPooled jedis = new JedisPooled(redisHost, redisPort);
-            ExecutorService executor = Executors.newFixedThreadPool(1);
+            JedisPoolConfig poolConfig = new JedisPoolConfig();
+            JedisPool jedisPool = new JedisPool(poolConfig, redisHost, redisPort, 1000);
+            Jedis subscriberJedis = jedisPool.getResource();
+            MyRedis subscriber = new MyRedis("onlyOne", session, REL_SUCCESS);
 
-            // Redis Session Run
-            executor.execute(() -> jedis.subscribe(new MyRedis("onlyOne", session, REL_SUCCESS), channelNm));
+            subscriberJedis.subscribe(subscriber, channelNm);
 
         } catch (Exception e) {
             return;
@@ -144,13 +147,10 @@ class MyRedis extends JedisPubSub {
         this.session = session;
         this.REL_SUCCESS = REL_SUCCESS;
     }
-
-    public void onSubscribe(String channel, int subscribedChannels) {
-        System.out.printf(
-                "name: %s method: %s channel: %s subscribedChannels: %d\n",
-                name, "onSubscribe", channel, subscribedChannels);
+    @Override
+    public void onMessage(String channel, String message) {
         FlowFile flowFile = session.create();
-        final String output = "name:"+ name + "method:" + "onUnsubscribe" + "channel: "+channel+" subscribedChannels: %d\n";
+        final String output = "Messsage : " + message ;//"name:"+ name + "method:" + "onUnsubscribe" + "channel: "+channel+" subscribedChannels: %d\n";
         flowFile = session.write(flowFile, new StreamCallback() {
             @Override
             public void process(InputStream in, OutputStream outputStream) throws IOException {
@@ -158,53 +158,6 @@ class MyRedis extends JedisPubSub {
             }
         });
         session.transfer(flowFile, REL_SUCCESS);
-    }
-    public void onUnsubscribe(String channel, int subscribedChannels) {
-        System.out.printf(
-                "name: %s method: %s channel: %s subscribedChannels: %d\n",
-                name, "onUnsubscribe", channel, subscribedChannels);
-        FlowFile flowFile = session.create();
-        final String output = "name:"+ name + "method:" + "onUnsubscribe" + "channel: "+channel+" subscribedChannels: %d\n";
-        flowFile = session.write(flowFile, new StreamCallback() {
-            @Override
-            public void process(InputStream in, OutputStream outputStream) throws IOException {
-                IOUtils.write(output, outputStream, "UTF-8");
-            }
-        });
-        session.transfer(flowFile, REL_SUCCESS);
-    }
-
-    public void onPUnsubscribe(String pattern, int subscribedChannels) {
-        System.out.printf(
-                "name: %s method: %s patten: %s subscribedChannels: %d\n",
-                name, "onPUnsubscribe", pattern, subscribedChannels);
-        FlowFile flowFile = session.create();
-        final String output = "name:"+ name + "method:" + "onUnsubscribe" + "pattern: "+pattern+" subscribedChannels: %d\n";
-        flowFile = session.write(flowFile, new StreamCallback() {
-            @Override
-            public void process(InputStream in, OutputStream outputStream) throws IOException {
-                IOUtils.write(output, outputStream, "UTF-8");
-            }
-        });
-        session.transfer(flowFile, REL_SUCCESS);
-    }
-
-    public void onPSubscribe(String pattern, int subscribedChannels) {
-        System.out.printf(
-                "name: %s method: %s patten: %s subscribedChannels: %d\n",
-                name, "onPSubscribe", pattern, subscribedChannels);
-        FlowFile flowFile = session.create();
-        final String output = "name:"+ name + "method:" + "onUnsubscribe" + "pattern: "+pattern+" subscribedChannels: %d\n";
-        flowFile = session.write(flowFile, new StreamCallback() {
-            @Override
-            public void process(InputStream in, OutputStream outputStream) throws IOException {
-                IOUtils.write(output, outputStream, "UTF-8");
-            }
-        });
-        session.transfer(flowFile, REL_SUCCESS);
-    }
-
-    public void onPong(String message) {
-        System.out.printf("name: %s method: %s message: %s\n", name, "onPong", message);
+        this.unsubscribe();
     }
 }
