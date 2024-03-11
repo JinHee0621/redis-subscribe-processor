@@ -40,8 +40,6 @@ import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPool;
 import redis.clients.jedis.JedisPoolConfig;
 import redis.clients.jedis.JedisPubSub;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 
 import java.io.IOException;
@@ -54,7 +52,7 @@ import java.util.*;
 @SeeAlso({})
 @ReadsAttributes({@ReadsAttribute(attribute="", description="")})
 @WritesAttributes({@WritesAttribute(attribute="", description="")})
-public class MyProcessor extends AbstractProcessor {
+public class RedisSubscribe extends AbstractProcessor {
     public static final PropertyDescriptor HOST_NUM = new PropertyDescriptor
             .Builder().name("Redis host")
             .displayName("Redis host")
@@ -78,6 +76,14 @@ public class MyProcessor extends AbstractProcessor {
             .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
             .build();
 
+    public static final PropertyDescriptor PASSWORD = new PropertyDescriptor
+            .Builder().name("Redis Host Password")
+            .displayName("Redis Host Password")
+            .description("Input Redis Password")
+            .required(false)
+            .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
+            .build();
+
 
     public static final Relationship REL_SUCCESS = new Relationship.Builder()
             .name("Success")
@@ -95,6 +101,7 @@ public class MyProcessor extends AbstractProcessor {
         descriptors.add(HOST_NUM);
         descriptors.add(PORT);
         descriptors.add(CHANNEL);
+        descriptors.add(PASSWORD);
         this.descriptors = Collections.unmodifiableList(descriptors);
 
         final Set<Relationship> relationships = new HashSet<>();
@@ -123,11 +130,17 @@ public class MyProcessor extends AbstractProcessor {
             String redisHost = context.getProperty(HOST_NUM).getValue();
             int redisPort = Integer.parseInt(context.getProperty(PORT).getValue());
             String channelNm = context.getProperty(CHANNEL).getValue();
+            String password = context.getProperty(PASSWORD).getValue();
 
             JedisPoolConfig poolConfig = new JedisPoolConfig();
-            JedisPool jedisPool = new JedisPool(poolConfig, redisHost, redisPort, 1000);
+            JedisPool jedisPool;
+            if(password != null) {
+                jedisPool = new JedisPool(poolConfig, redisHost, redisPort, 1000, password);
+            } else {
+                jedisPool = new JedisPool(poolConfig, redisHost, redisPort, 1000);
+            }
             Jedis subscriberJedis = jedisPool.getResource();
-            MyRedis subscriber = new MyRedis("onlyOne", session, REL_SUCCESS);
+            RedisRes subscriber = new RedisRes("onlyOne", session, REL_SUCCESS);
 
             subscriberJedis.subscribe(subscriber, channelNm);
 
@@ -138,11 +151,11 @@ public class MyProcessor extends AbstractProcessor {
     }
 }
 
-class MyRedis extends JedisPubSub {
+class RedisRes extends JedisPubSub {
     private String name;
     private ProcessSession session;
     private Relationship REL_SUCCESS;
-    public MyRedis(String name, final ProcessSession session, Relationship REL_SUCCESS) {
+    public RedisRes(String name, final ProcessSession session, Relationship REL_SUCCESS) {
         this.name = name;
         this.session = session;
         this.REL_SUCCESS = REL_SUCCESS;
