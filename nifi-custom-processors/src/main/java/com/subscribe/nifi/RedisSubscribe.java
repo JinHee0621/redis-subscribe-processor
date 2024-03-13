@@ -47,7 +47,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.*;
 
-@Tags({"example"})
+@Tags({"Redis", "PubSub"})
 @CapabilityDescription("Provide a description")
 @SeeAlso({})
 @ReadsAttributes({@ReadsAttribute(attribute="", description="")})
