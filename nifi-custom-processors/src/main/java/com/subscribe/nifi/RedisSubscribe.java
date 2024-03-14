@@ -80,6 +80,7 @@ public class RedisSubscribe extends AbstractProcessor {
             .Builder().name("Redis Host Password")
             .displayName("Redis Host Password")
             .description("Input Redis Password")
+            .sensitive(true)
             .required(false)
             .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
             .build();
@@ -87,7 +88,12 @@ public class RedisSubscribe extends AbstractProcessor {
 
     public static final Relationship REL_SUCCESS = new Relationship.Builder()
             .name("Success")
-            .description("All created FlowFiles are routed to this relationship")
+            .description("Can Subscribe Redis Channel")
+            .build();
+
+    public static final Relationship REL_FAIL = new Relationship.Builder()
+            .name("Failed")
+            .description("Redis Error Occurred")
             .build();
 
     private List<PropertyDescriptor> descriptors;
@@ -106,6 +112,7 @@ public class RedisSubscribe extends AbstractProcessor {
 
         final Set<Relationship> relationships = new HashSet<>();
         relationships.add(REL_SUCCESS);
+        relationships.add(REL_FAIL);
         this.relationships = Collections.unmodifiableSet(relationships);
     }
 
@@ -145,7 +152,14 @@ public class RedisSubscribe extends AbstractProcessor {
             subscriberJedis.subscribe(subscriber, channelNm);
 
         } catch (Exception e) {
-            return;
+            FlowFile flowFile = session.create();
+            flowFile = session.write(flowFile, new StreamCallback() {
+                @Override
+                public void process(InputStream in, OutputStream outputStream) throws IOException {
+                    IOUtils.write(e.getMessage(), outputStream, "UTF-8");
+                }
+            });
+            session.transfer(flowFile, REL_FAIL);
         }
 
     }
