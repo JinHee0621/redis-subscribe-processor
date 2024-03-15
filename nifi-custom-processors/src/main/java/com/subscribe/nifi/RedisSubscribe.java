@@ -47,7 +47,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.*;
 
-@Tags({"Redis", "PubSub"})
+@Tags({"Redis", "PubSub", "Subscribe"})
 @CapabilityDescription("Provide a description")
 @SeeAlso({})
 @ReadsAttributes({@ReadsAttribute(attribute="", description="")})
@@ -87,12 +87,12 @@ public class RedisSubscribe extends AbstractProcessor {
 
 
     public static final Relationship REL_SUCCESS = new Relationship.Builder()
-            .name("Success")
+            .name("success")
             .description("Can Subscribe Redis Channel")
             .build();
 
     public static final Relationship REL_FAIL = new Relationship.Builder()
-            .name("Failed")
+            .name("failure")
             .description("Redis Error Occurred")
             .build();
 
