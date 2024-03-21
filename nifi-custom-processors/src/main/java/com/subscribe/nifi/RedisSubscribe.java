@@ -133,6 +133,7 @@ public class RedisSubscribe extends AbstractProcessor {
 
     @Override
     public void onTrigger(final ProcessContext context, final ProcessSession session) {
+        Jedis subscriberJedis = null;
         try {
             String redisHost = context.getProperty(HOST_NUM).getValue();
             int redisPort = Integer.parseInt(context.getProperty(PORT).getValue());
@@ -146,10 +147,10 @@ public class RedisSubscribe extends AbstractProcessor {
             } else {
                 jedisPool = new JedisPool(poolConfig, redisHost, redisPort, 1000);
             }
-            Jedis subscriberJedis = jedisPool.getResource();
-            RedisRes subscriber = new RedisRes("onlyOne", session, REL_SUCCESS);
-
+            subscriberJedis = jedisPool.getResource();
+            RedisRes subscriber = new RedisRes(subscriberJedis,"onlyOne", session, REL_SUCCESS);
             subscriberJedis.subscribe(subscriber, channelNm);
+            subscriberJedis.close();
 
         } catch (Exception e) {
             FlowFile flowFile = session.create();
@@ -160,16 +161,19 @@ public class RedisSubscribe extends AbstractProcessor {
                 }
             });
             session.transfer(flowFile, REL_FAIL);
+            if(subscriberJedis != null) subscriberJedis.close();
         }
 
     }
 }
 
 class RedisRes extends JedisPubSub {
+    private Jedis subscriber;
     private String name;
     private ProcessSession session;
     private Relationship REL_SUCCESS;
-    public RedisRes(String name, final ProcessSession session, Relationship REL_SUCCESS) {
+    public RedisRes(Jedis subscriber, String name, final ProcessSession session, Relationship REL_SUCCESS) {
+        this.subscriber = subscriber;
         this.name = name;
         this.session = session;
         this.REL_SUCCESS = REL_SUCCESS;
@@ -185,6 +189,8 @@ class RedisRes extends JedisPubSub {
             }
         });
         session.transfer(flowFile, REL_SUCCESS);
+        // Redis Client Close
+        subscriber.close();
         this.unsubscribe();
     }
 }
