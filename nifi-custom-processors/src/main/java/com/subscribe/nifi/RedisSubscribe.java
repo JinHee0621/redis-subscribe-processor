@@ -130,27 +130,24 @@ public class RedisSubscribe extends AbstractProcessor {
     public void onScheduled(final ProcessContext context) {
 
     }
-
+    Jedis subscriberJedis = null;
+    JedisPool jedisPool = null;
+    JedisPoolConfig poolConfig = new JedisPoolConfig();
     @Override
     public void onTrigger(final ProcessContext context, final ProcessSession session) {
-        Jedis subscriberJedis = null;
         try {
             String redisHost = context.getProperty(HOST_NUM).getValue();
             int redisPort = Integer.parseInt(context.getProperty(PORT).getValue());
             String channelNm = context.getProperty(CHANNEL).getValue();
             String password = context.getProperty(PASSWORD).getValue();
-
-            JedisPoolConfig poolConfig = new JedisPoolConfig();
-            JedisPool jedisPool;
             if(password != null) {
-                jedisPool = new JedisPool(poolConfig, redisHost, redisPort, 1000, password);
+                jedisPool = new JedisPool(poolConfig, redisHost, redisPort, 0, password);
             } else {
-                jedisPool = new JedisPool(poolConfig, redisHost, redisPort, 1000);
+                jedisPool = new JedisPool(poolConfig, redisHost, redisPort, 0);
             }
             subscriberJedis = jedisPool.getResource();
             RedisRes subscriber = new RedisRes(subscriberJedis,"onlyOne", session, REL_SUCCESS);
             subscriberJedis.subscribe(subscriber, channelNm);
-            subscriberJedis.close();
 
         } catch (Exception e) {
             FlowFile flowFile = session.create();
@@ -163,34 +160,35 @@ public class RedisSubscribe extends AbstractProcessor {
             session.transfer(flowFile, REL_FAIL);
             if(subscriberJedis != null) subscriberJedis.close();
         }
-
+    }
+    class RedisRes extends JedisPubSub {
+        private Jedis subscriber;
+        private String name;
+        private ProcessSession session;
+        private Relationship REL_SUCCESS;
+        public RedisRes(Jedis subscriber, String name, final ProcessSession session, Relationship REL_SUCCESS) {
+            this.subscriber = subscriber;
+            this.name = name;
+            this.session = session;
+            this.REL_SUCCESS = REL_SUCCESS;
+        }
+        @Override
+        public void onMessage(String channel, String message) {
+            FlowFile flowFile = session.create();
+            final String output = "Messsage : " + message ;//"name:"+ name + "method:" + "onUnsubscribe" + "channel: "+channel+" subscribedChannels: %d\n";
+            flowFile = session.write(flowFile, new StreamCallback() {
+                @Override
+                public void process(InputStream in, OutputStream outputStream) throws IOException {
+                    IOUtils.write(output, outputStream, "UTF-8");
+                }
+            });
+            session.transfer(flowFile, REL_SUCCESS);
+            // Redis Client Close
+            this.unsubscribe();
+            jedisPool.returnResource(subscriber);
+            subscriber.close();
+        }
     }
 }
 
-class RedisRes extends JedisPubSub {
-    private Jedis subscriber;
-    private String name;
-    private ProcessSession session;
-    private Relationship REL_SUCCESS;
-    public RedisRes(Jedis subscriber, String name, final ProcessSession session, Relationship REL_SUCCESS) {
-        this.subscriber = subscriber;
-        this.name = name;
-        this.session = session;
-        this.REL_SUCCESS = REL_SUCCESS;
-    }
-    @Override
-    public void onMessage(String channel, String message) {
-        FlowFile flowFile = session.create();
-        final String output = "Messsage : " + message ;//"name:"+ name + "method:" + "onUnsubscribe" + "channel: "+channel+" subscribedChannels: %d\n";
-        flowFile = session.write(flowFile, new StreamCallback() {
-            @Override
-            public void process(InputStream in, OutputStream outputStream) throws IOException {
-                IOUtils.write(output, outputStream, "UTF-8");
-            }
-        });
-        session.transfer(flowFile, REL_SUCCESS);
-        // Redis Client Close
-        subscriber.close();
-        this.unsubscribe();
-    }
-}
+
