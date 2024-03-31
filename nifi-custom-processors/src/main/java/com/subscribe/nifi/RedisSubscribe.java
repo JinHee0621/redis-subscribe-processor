@@ -177,6 +177,7 @@ public class RedisSubscribe extends AbstractProcessor {
                 }
             });
             session.transfer(flowFile, REL_FAIL);
+            session.commit();
             if(subscriberJedis != null) subscriberJedis.close();
         }
     }
@@ -217,12 +218,7 @@ class RedisRes extends JedisPubSub {
             }
         });
         session.transfer(flowFile, REL_SUCCESS);
-        this.unsubscribe();
-
-        // Redis Client Close
-        subscriber.disconnect();
-        subscriber.close();
-        executor.shutdownNow();
+        session.commit();
     }
 }
 
