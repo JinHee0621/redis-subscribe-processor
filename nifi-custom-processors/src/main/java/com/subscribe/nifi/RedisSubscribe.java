@@ -45,13 +45,15 @@ import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 @Tags({"Redis", "PubSub", "Subscribe"})
 @CapabilityDescription("Provide a description")
 @SeeAlso({})
 @ReadsAttributes({@ReadsAttribute(attribute="", description="")})
 @WritesAttributes({@WritesAttribute(attribute="", description="")})
-public class RedisSubscribe extends AbstractProcessor {
+public class RedisSubscribe extends AbstractRedisSubscribe {
     public static final PropertyDescriptor HOST_NUM = new PropertyDescriptor
             .Builder().name("Redis host")
             .displayName("Redis host")
@@ -129,11 +131,21 @@ public class RedisSubscribe extends AbstractProcessor {
     JedisPoolConfig poolConfig = new JedisPoolConfig();
     ExecutorService subscribers;
     RedisRes subscriber = null;
+    AtomicReference<ProcessSessionFactory> sessionFactoryReference = new AtomicReference<>();
     @OnScheduled()
     public void onScheduled(final ProcessContext context) {
     }
     @Override
+    public void onTrigger(final ProcessContext context, ProcessSessionFactory sessionFactory) {
+        sessionFactoryReference.compareAndSet(null, sessionFactory);
+        context.yield();
+    }
+    @Override
     public void onTrigger(final ProcessContext context, final ProcessSession session) {
+    }
+
+    @OnScheduled()
+    public void startSubcription(final ProcessContext context) {
         try {
             String redisHost = context.getProperty(HOST_NUM).getValue();
             int redisPort = Integer.parseInt(context.getProperty(PORT).getValue());
@@ -148,27 +160,15 @@ public class RedisSubscribe extends AbstractProcessor {
 
             subscriberJedis = jedisPool.getResource();
             subscribers = Executors.newSingleThreadExecutor();
-            subscriber = new RedisRes(subscriberJedis, session, REL_SUCCESS, subscribers);
-
+            subscriber = new RedisRes(sessionFactoryReference, REL_SUCCESS);
             subscribers.submit(() -> {
                         subscriberJedis.subscribe(subscriber, channelNm);
-                }
+                    }
             );
-
-            subscribers.awaitTermination(5000, TimeUnit.MILLISECONDS);
-
-            if(subscribers.isShutdown()) {
-                subscribers.shutdownNow();
-                subscribers = null;
-            }
-
-            if(subscriberJedis.isConnected()) {
-                subscriberJedis.disconnect();
-                subscriberJedis.close();
-                subscriberJedis = null;
-            }
-
         } catch (Exception e) {
+            final ProcessSessionFactory sessionFactory = Delay.waitForObject(sessionFactoryReference::get,
+                    100);
+            ProcessSession session = sessionFactory.createSession();
             FlowFile flowFile = session.create();
             flowFile = session.write(flowFile, new StreamCallback() {
                 @Override
@@ -181,6 +181,7 @@ public class RedisSubscribe extends AbstractProcessor {
             if(subscriberJedis != null) subscriberJedis.close();
         }
     }
+
     @OnStopped
     public void stopSubscription(final ProcessContext context) {
         if (subscriber != null && subscriber.isSubscribed()) {
@@ -189,26 +190,33 @@ public class RedisSubscribe extends AbstractProcessor {
                 subscribers.awaitTermination(5000, TimeUnit.MILLISECONDS);
                 subscribers.shutdownNow();
                 subscribers = null;
+
+                if(subscriberJedis.isConnected()) {
+                    subscriberJedis.disconnect();
+                    subscriberJedis.close();
+                    subscriberJedis = null;
+                }
             } catch (InterruptedException e) {
                 getLogger().warn("Unable to cleanly shutdown due to {}", new Object[]{e});
             }
         }
+        sessionFactoryReference.set(null);
     }
 }
 
 class RedisRes extends JedisPubSub {
-    private Jedis subscriber;
-    private ProcessSession session;
+    private AtomicReference<ProcessSessionFactory> sessionFactoryReference;
     private Relationship REL_SUCCESS;
-    private ExecutorService executor;
-    public RedisRes(Jedis subscriber,final ProcessSession session, Relationship REL_SUCCESS, ExecutorService executor) {
-        this.subscriber = subscriber;
-        this.session = session;
+    public RedisRes(AtomicReference<ProcessSessionFactory> sessionFactoryReference, Relationship REL_SUCCESS) {
+        this.sessionFactoryReference = sessionFactoryReference;
         this.REL_SUCCESS = REL_SUCCESS;
-        this.executor = executor;
     }
     @Override
     public void onMessage(String channel, String message) {
+        final ProcessSessionFactory sessionFactory = Delay.waitForObject(sessionFactoryReference::get,
+                100);
+        ProcessSession session = sessionFactory.createSession();
+
         FlowFile flowFile = session.create();
         final String output = "Messsage : " + message ;//"name:"+ name + "method:" + "onUnsubscribe" + "channel: "+channel+" subscribedChannels: %d\n";
         flowFile = session.write(flowFile, new StreamCallback() {
@@ -219,6 +227,27 @@ class RedisRes extends JedisPubSub {
         });
         session.transfer(flowFile, REL_SUCCESS);
         session.commit();
+    }
+}
+
+class Delay {
+    public static<T> T waitForObject(Supplier<T> action, int time ){
+        T result = null;
+        int i = 0;
+        while (result == null) {
+            result = action.get();
+            if(result == null) {
+                try{
+                    Thread.sleep(time);
+                    if(i++ % (1000/time) == 0) {
+                        System.out.println("Waiting for sessionFactory");
+                    }
+                }catch (InterruptedException e) {
+
+                }
+            }
+        }
+        return result;
     }
 }
 
